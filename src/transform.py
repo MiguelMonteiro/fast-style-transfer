@@ -1,4 +1,5 @@
 import tensorflow as tf
+import numpy as np
 
 WEIGHTS_INIT_STDEV = .1
 
@@ -44,6 +45,7 @@ def _conv_tranpose_layer(net, num_filters, filter_size, strides):
     net = tf.nn.conv2d_transpose(net, weights_init, tf_shape, strides_shape, padding='SAME')
     net = _instance_norm(net)
     return tf.nn.relu(net)
+
 
 
 def _residual_block(net, filter_size=3):

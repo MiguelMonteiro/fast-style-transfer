@@ -23,7 +23,7 @@ def run(target, cluster_spec, is_chief, job_dir, content_weight, style_path, sty
         test_image_path, epochs, checkpoint_iterations, batch_size, learning_rate, log_iterations=10):
     # pre compute style features first
     with tf.Graph().as_default():
-        with tf.device(tf.train.replica_device_setter()):
+        with tf.device(tf.train.replica_device_setter(cluster=cluster_spec)):
             tf_style_features = model.pre_compute_style_features(vgg_path, style_path)
         with tf.Session() as sess:
             style_features = sess.run(tf_style_features)
@@ -47,19 +47,19 @@ def run(target, cluster_spec, is_chief, job_dir, content_weight, style_path, sty
                 hooks.append(tf.train.CheckpointSaverHook(checkpoint_dir=checkpoint_dir,
                                                           save_steps=checkpoint_iterations))
 
+        config = tf.ConfigProto(log_device_placement=True)
         with tf.train.MonitoredTrainingSession(master=target,
                                                is_chief=is_chief,
                                                checkpoint_dir=job_dir,
                                                hooks=hooks,
                                                save_checkpoint_secs=None,
                                                save_summaries_steps=None,
-                                               log_step_count_steps=log_iterations) as sess:
+                                               log_step_count_steps=log_iterations,
+                                               config=config) as sess:
             uid = random.randint(1, 100)
             tf.logging.info('UID: %s' % uid)
             while not sess.should_stop():
                 start_time = time.time()
-                # train step
-                # tup = sess.run([train_step, style_loss, content_loss, tv_loss, loss, global_step])
                 _, global_step, style_loss, content_loss, tv_loss, loss = sess.run(tensors)
                 end_time = time.time()
                 delta_time = end_time - start_time
