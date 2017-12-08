@@ -34,18 +34,19 @@ def _conv_layer(net, num_filters, filter_size, strides, relu=True):
 def _conv_tranpose_layer(net, num_filters, filter_size, strides):
     weights_init = _conv_init_vars(net, num_filters, filter_size, transpose=True)
 
-    batch_size, rows, cols, in_channels = [i.value for i in net.get_shape()]
-    new_rows, new_cols = int(rows * strides), int(cols * strides)
-    # new_shape = #tf.pack([tf.shape(net)[0], new_rows, new_cols, num_filters])
+    _, rows, cols, in_channels = net.get_shape()
 
-    new_shape = [batch_size, new_rows, new_cols, num_filters]
+    new_shape = [tf.shape(net)[0], rows * strides, cols * strides, num_filters]
     tf_shape = tf.stack(new_shape)
     strides_shape = [1, strides, strides, 1]
 
     net = tf.nn.conv2d_transpose(net, weights_init, tf_shape, strides_shape, padding='SAME')
+
+    # must use reshape to conserve shape information
+    net = tf.reshape(net, tf_shape)
+
     net = _instance_norm(net)
     return tf.nn.relu(net)
-
 
 
 def _residual_block(net, filter_size=3):
