@@ -1,6 +1,4 @@
 from __future__ import print_function
-
-
 import numpy as np, os
 from src import transform
 import tensorflow as tf
@@ -10,8 +8,7 @@ from collections import defaultdict
 import json
 import subprocess
 import numpy
-from StringIO import StringIO
-
+from PIL import Image
 
 BATCH_SIZE = 4
 DEVICE = '/gpu:0'
@@ -188,20 +185,19 @@ def ffwd(data_in, paths_out, checkpoint_dir, device_t='/gpu:0', batch_size=4):
                     save_img(output_path, pred)
 
 
-
 def ffwd_to_img(in_path, out_path, checkpoint_dir, device='/cpu:0'):
     paths_in, paths_out = [in_path], [out_path]
     ffwd(paths_in, paths_out, checkpoint_dir, batch_size=1, device_t=device)
 
 
-def ffwd_different_dimensions(in_path, out_path, checkpoint_dir,
-                              device_t=DEVICE, batch_size=4):
+def ffwd_different_dimensions(in_path, out_path, checkpoint_dir, device_t=DEVICE, batch_size=4):
     in_path_of_shape = defaultdict(list)
     out_path_of_shape = defaultdict(list)
     for i in range(len(in_path)):
         in_image = in_path[i]
         out_image = out_path[i]
-        shape = "%dx%dx%d" % get_img(in_image).shape
+        shape = "%dx%d" % Image.open(in_image).size
+        # shape = "%dx%dx%d" % get_img(in_image).shape
         in_path_of_shape[shape].append(in_image)
         out_path_of_shape[shape].append(out_image)
     for shape in in_path_of_shape:

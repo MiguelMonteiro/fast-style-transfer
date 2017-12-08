@@ -14,13 +14,9 @@ def read_jpeg(src):
     return image
 
 
-def get_img(src, img_size=False):
+def get_img(src):
     f = StringIO(file_io.read_file_to_string(src))
-    img = scipy.misc.imread(f, mode='RGB')  # misc.imresize(, (256, 256, 3))
-    if not (len(img.shape) == 3 and img.shape[2] == 3):
-        img = np.dstack((img, img, img))
-    if img_size:
-        img = scipy.misc.imresize(img, img_size)
+    img = scipy.misc.imread(f, mode='RGB')
     return img
 
 
