@@ -1,6 +1,5 @@
 import tensorflow as tf
 import scipy.misc
-import numpy as np
 from tensorflow.python.lib.io import file_io
 from StringIO import StringIO
 

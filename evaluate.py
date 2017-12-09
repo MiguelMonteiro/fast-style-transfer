@@ -14,13 +14,31 @@ BATCH_SIZE = 4
 DEVICE = '/gpu:0'
 
 
+def read_frames(pipe_in, batch_size, height, width):
+    nbytes = height * width * 3
+    count = 0
+    frames = list()
+    while count < batch_size:
+        raw_image = pipe_in.stdout.read(nbytes)
+
+        if len(raw_image) != nbytes:
+            return frames
+        else:
+            image = numpy.fromstring(raw_image, dtype='uint8')
+            image = image.reshape((height, width, 3))
+            frames.append(image)
+            count += 1
+    return frames
+
+
 def from_pipe(opts):
     command = ["ffprobe",
                '-v', "quiet",
                '-print_format', 'json',
                '-show_streams', opts.in_path]
-
-    info = json.loads(str(subprocess.check_output(command), encoding="utf8"))
+    print(opts.in_path)
+    # info = json.loads(str(subprocess.check_output(command), encoding="utf8"))
+    info = json.loads(str(subprocess.check_output(command)))
     width = int(info["streams"][0]["width"])
     height = int(info["streams"][0]["height"])
     fps = round(eval(info["streams"][0]["r_frame_rate"]))
@@ -54,13 +72,14 @@ def from_pipe(opts):
     soft_config = tf.ConfigProto(allow_soft_placement=True)
     soft_config.gpu_options.allow_growth = True
 
-    with g.as_default(), g.device(opts.device), \
-         tf.Session(config=soft_config) as sess:
-        batch_shape = (opts.batch_size, height, width, 3)
-        img_placeholder = tf.placeholder(tf.float32, shape=batch_shape,
-                                         name='img_placeholder')
-        preds = transform.net(img_placeholder)
+    with g.as_default(), g.device(opts.device), tf.Session(config=soft_config) as sess:
+
+        batch_shape = (None, height, width, 3)
+        img_placeholder = tf.placeholder(tf.float32, shape=batch_shape, name='img_placeholder')
+        tf_preds = transform.net(img_placeholder)
+
         saver = tf.train.Saver()
+
         if os.path.isdir(opts.checkpoint):
             ckpt = tf.train.get_checkpoint_state(opts.checkpoint)
             if ckpt and ckpt.model_checkpoint_path:
@@ -69,50 +88,25 @@ def from_pipe(opts):
                 raise Exception("No checkpoint found...")
         else:
             saver.restore(sess, opts.checkpoint)
+        f = 0
+        while True:
+            frames = read_frames(pipe_in, opts.batch_size, height, width)
+            if not frames:
+                break
+            f += len(frames)
+            preds = sess.run(tf_preds, feed_dict={img_placeholder: np.stack(frames)})
+            print("Number of frames processed %s" % f)
+            for i in range(len(preds)):
+                img = np.clip(preds[i], 0, 255).astype(np.uint8)
+                try:
+                    pipe_out.stdin.write(img)
+                except IOError as err:
+                    ffmpeg_error = pipe_out.stderr.read()
+                    error = (str(err) + ("\n\nFFMPEG encountered"
+                                         "the following error while writing file:"
+                                         "\n\n %s" % ffmpeg_error))
+                    print(error)
 
-        X = np.zeros(batch_shape, dtype=np.float32)
-        nbytes = 3 * width * height
-        read_input = True
-        last = False
-
-        while read_input:
-            count = 0
-            while count < opts.batch_size:
-                raw_image = pipe_in.stdout.read(width * height * 3)
-
-                if len(raw_image) != nbytes:
-                    if count == 0:
-                        read_input = False
-                    else:
-                        last = True
-                        X = X[:count]
-                        batch_shape = (count, height, width, 3)
-                        img_placeholder = tf.placeholder(tf.float32, shape=batch_shape,
-                                                         name='img_placeholder')
-                        preds = transform.net(img_placeholder)
-                    break
-
-                image = numpy.fromstring(raw_image, dtype='uint8')
-                image = image.reshape((height, width, 3))
-                X[count] = image
-                count += 1
-
-            if read_input:
-                if last:
-                    read_input = False
-                _preds = sess.run(preds, feed_dict={img_placeholder: X})
-
-                for i in range(0, batch_shape[0]):
-                    img = np.clip(_preds[i], 0, 255).astype(np.uint8)
-                    try:
-                        pipe_out.stdin.write(img)
-                    except IOError as err:
-                        ffmpeg_error = pipe_out.stderr.read()
-                        error = (str(err) + ("\n\nFFMPEG encountered"
-                                             "the following error while writing file:"
-                                             "\n\n %s" % ffmpeg_error))
-                        read_input = False
-                        print(error)
         pipe_out.terminate()
         pipe_in.terminate()
         pipe_out.stdin.close()
@@ -139,7 +133,6 @@ def input_fn(input_filenames, out_filenames, batch_shape):
     return image, output_file_name
 
 
-# get img_shape
 def ffwd(data_in, paths_out, checkpoint_dir, device_t='/gpu:0', batch_size=4):
     assert len(paths_out) > 0
     is_paths = type(data_in[0]) == str
@@ -162,7 +155,7 @@ def ffwd(data_in, paths_out, checkpoint_dir, device_t='/gpu:0', batch_size=4):
         tf_images, tf_output_paths = input_fn(data_in, paths_out, batch_shape)
         # img_placeholder = tf.placeholder(tf.float32, shape=batch_shape, name='img_placeholder')
 
-        tf_preds = transform.net(tf_images)
+        tf_preds = transform.net(tf_images / 255.0)
         tf_preds = tf.cast(tf.clip_by_value(tf_preds, 0, 255), dtype=tf.uint8)
         tf_preds = tf.map_fn(tf.image.encode_jpeg, tf_preds, dtype=tf.string)
         saver = tf.train.Saver()
@@ -251,13 +244,10 @@ def main():
 
     if not os.path.isdir(opts.in_path):
         if os.path.exists(opts.out_path) and os.path.isdir(opts.out_path):
-            out_path = \
-                os.path.join(opts.out_path, os.path.basename(opts.in_path))
+            out_path = os.path.join(opts.out_path, os.path.basename(opts.in_path))
         else:
             out_path = opts.out_path
-
-        ffwd_to_img(opts.in_path, out_path, opts.checkpoint_dir,
-                    device=opts.device)
+        ffwd_to_img(opts.in_path, out_path, opts.checkpoint_dir, device=opts.device)
     else:
         files = list_files(opts.in_path)
         full_in = [os.path.join(opts.in_path, x) for x in files]
